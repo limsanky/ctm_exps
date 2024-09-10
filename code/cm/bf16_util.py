@@ -10,18 +10,20 @@ from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 from . import logger
 from . import dist_util
 
+from .networks import Conv2d, UNetBlock
+
 INITIAL_LOG_LOSS_SCALE = 20.0
 
-
-def convert_module_to_f16(l):
+def convert_module_to_bf16(l):
     """
     Convert primitive modules to float16.
     """
     if isinstance(l, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
-        l.weight.data = l.weight.data.half()
+        # l.weight.data = l.weight.data.half()
+        l.weight.data = l.weight.data.bfloat16()
         if l.bias is not None:
-            l.bias.data = l.bias.data.half()
-
+            # l.bias.data = l.bias.data.half()
+            l.bias.data = l.bias.data.bfloat16()
 
 def convert_module_to_f32(l):
     """
@@ -33,7 +35,7 @@ def convert_module_to_f32(l):
             l.bias.data = l.bias.data.float()
 
 
-def make_master_params(param_groups_and_shapes):
+def make_master_params_bf16(param_groups_and_shapes):
     """
     Copy model parameters into a (differently-shaped) list of full-precision
     parameters.
@@ -70,7 +72,7 @@ def model_grads_to_master_grads(param_groups_and_shapes, master_params):
         ).view(shape)
 
 
-def master_params_to_model_params(param_groups_and_shapes, master_params):
+def master_params_to_model_params_bf16(param_groups_and_shapes, master_params):
     """
     Copy the master parameter data back into the model parameters.
     """
@@ -87,7 +89,7 @@ def unflatten_master_params(param_group, master_param):
     return _unflatten_dense_tensors(master_param, [param for (_, param) in param_group])
 
 
-def get_param_groups_and_shapes(named_model_params):
+def get_param_groups_and_shapes_bf16(named_model_params):
     named_model_params = list(named_model_params)
     scalar = []
     matrix = []
@@ -114,7 +116,7 @@ def get_param_groups_and_shapes(named_model_params):
     #)
     return [scalar_vector_named_params, matrix_named_params]
 
-def get_target_param_groups_and_shapes(named_model_params, source_named_model_params):
+def get_target_param_groups_and_shapes_bf16(named_model_params, source_named_model_params):
     named_model_params = list(named_model_params)
     source_named_model_params = {n: p for (n,p) in list(source_named_model_params)}
     scalar = []
@@ -136,9 +138,12 @@ def get_target_param_groups_and_shapes(named_model_params, source_named_model_pa
 
 
 def master_params_to_state_dict(
-    model, param_groups_and_shapes, master_params, use_fp16
+    model, param_groups_and_shapes, master_params, 
+    # use_fp16
+    use_bf16
 ):
-    if use_fp16:
+    # if use_fp16:
+    if use_bf16:
         state_dict = model.state_dict()
         for master_param, (param_group, _) in zip(
             master_params, param_groups_and_shapes
@@ -156,13 +161,17 @@ def master_params_to_state_dict(
     return state_dict
 
 
-def state_dict_to_master_params(model, state_dict, use_fp16):
-    if use_fp16:
+def state_dict_to_master_params_bf16(model, state_dict, 
+                                # use_fp16
+                                use_bf16
+                                ):
+    # if use_fp16:
+    if use_bf16:
         named_model_params = [
             (name, state_dict[name].to(dist_util.dev())) for name, _ in model.named_parameters()
         ]
-        param_groups_and_shapes = get_param_groups_and_shapes(named_model_params)
-        master_params = make_master_params(param_groups_and_shapes)
+        param_groups_and_shapes = get_param_groups_and_shapes_bf16(named_model_params)
+        master_params = make_master_params_bf16(param_groups_and_shapes)
     else:
         master_params = [state_dict[name] for name, _ in model.named_parameters()]
     return master_params
@@ -188,18 +197,22 @@ def param_grad_or_zeros(param):
         return th.zeros_like(param)
 
 
-class MixedPrecisionTrainer:
+class MixedPrecisionTrainer_bf16:
     def __init__(
         self,
         *,
         model,
-        use_fp16=False,
-        fp16_scale_growth=1e-3,
+        # use_fp16=False,
+        use_bf16=False,
+        # fp16_scale_growth=1e-3,
+        bf16_scale_growth=1e-3,
         initial_lg_loss_scale=INITIAL_LOG_LOSS_SCALE,
     ):
         self.model = model
-        self.use_fp16 = use_fp16
-        self.fp16_scale_growth = fp16_scale_growth
+        # self.use_fp16 = use_fp16
+        self.use_bf16 = use_bf16
+        # self.fp16_scale_growth = fp16_scale_growth
+        self.bf16_scale_growth = bf16_scale_growth
 
         self.model_params = list(self.model.parameters())
         self.master_params = self.model_params
@@ -209,18 +222,21 @@ class MixedPrecisionTrainer:
         #for name, param in self.model.named_parameters():
         #    print(name, param.requires_grad)
         
-        if self.use_fp16:
-            self.param_groups_and_shapes = get_param_groups_and_shapes(
+        # if self.use_fp16:
+        if self.use_bf16:
+            self.param_groups_and_shapes = get_param_groups_and_shapes_bf16(
                 self.model.named_parameters()
             )
-            self.master_params = make_master_params(self.param_groups_and_shapes)
-            self.model.convert_to_fp16()
+            self.master_params = make_master_params_bf16(self.param_groups_and_shapes)
+            # self.model.convert_to_fp16()
+            self.model.convert_to_bf16()
 
     def zero_grad(self):
         zero_grad(self.model_params)
 
     def backward(self, loss: th.Tensor):
-        if self.use_fp16:
+        # if self.use_fp16:
+        if self.use_bf16:
             loss_scale = 2**self.lg_loss_scale
             #print("loss value: ", (loss*loss_scale).item())
             (loss * loss_scale).backward()
@@ -228,12 +244,15 @@ class MixedPrecisionTrainer:
             loss.backward()
 
     def optimize(self, opt: th.optim.Optimizer):
-        if self.use_fp16:
-            return self._optimize_fp16(opt)
+        # if self.use_fp16:
+        if self.use_bf16:
+            # return self._optimize_fp16(opt)
+            return self._optimize_bf16(opt)
         else:
             return self._optimize_normal(opt)
 
-    def _optimize_fp16(self, opt: th.optim.Optimizer):
+    # def _optimize_fp16(self, opt: th.optim.Optimizer):
+    def _optimize_bf16(self, opt: th.optim.Optimizer):
         logger.logkv_mean("lg_loss_scale", self.lg_loss_scale)
         model_grads_to_master_grads(self.param_groups_and_shapes, self.master_params)
         grad_norm, param_norm = self._compute_norms(grad_scale=2**self.lg_loss_scale)
@@ -254,8 +273,9 @@ class MixedPrecisionTrainer:
 
         opt.step()
         zero_master_grads(self.master_params)
-        master_params_to_model_params(self.param_groups_and_shapes, self.master_params)
-        self.lg_loss_scale += self.fp16_scale_growth
+        master_params_to_model_params_bf16(self.param_groups_and_shapes, self.master_params)
+        # self.lg_loss_scale += self.fp16_scale_growth
+        self.lg_loss_scale += self.bf16_scale_growth
         return True
 
     def _optimize_normal(self, opt: th.optim.Optimizer):
@@ -281,11 +301,16 @@ class MixedPrecisionTrainer:
 
     def master_params_to_state_dict(self, master_params):
         return master_params_to_state_dict(
-            self.model, self.param_groups_and_shapes, master_params, self.use_fp16
+            self.model, self.param_groups_and_shapes, master_params, 
+            # self.use_fp16
+            self.use_bf16
         )
 
     def state_dict_to_master_params(self, state_dict):
-        return state_dict_to_master_params(self.model, state_dict, self.use_fp16)
+        return state_dict_to_master_params_bf16(self.model, state_dict, 
+                                        #   self.use_fp16
+                                            self.use_bf16
+                                           )
 
 
 def check_overflow(value):

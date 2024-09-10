@@ -15,9 +15,6 @@ from torch.nn.functional import silu
 from .nn import append_dims
 import cm.dist_util as dist_util
 
-# from .fp16_util import convert_module_to_f16
-# from .bf16_util import convert_module_to_bf16, convert_module_to_f32
-
 #----------------------------------------------------------------------------
 # Unified routine for initializing weights and biases.
 
@@ -270,8 +267,7 @@ class PositionalEmbedding(torch.nn.Module):
 
 @persistence.persistent_class
 class FourierEmbedding(torch.nn.Module):
-    # def __init__(self, num_channels, scale=16):
-    def __init__(self, num_channels, scale=0.02):
+    def __init__(self, num_channels, scale=16):
         super().__init__()
         self.register_buffer('freqs', torch.randn(num_channels // 2) * scale)
 
@@ -310,8 +306,6 @@ class SongUNet(torch.nn.Module):
         resample_filter     = [1,3,3,1],        # Resampling filter: [1,1] for DDPM++, [1,3,3,1] for NCSN++.
         training_mode = '',
         linear_probing=False,
-        
-        condition_mode      = None,
     ):
         assert embedding_type in ['fourier', 'positional']
         assert encoder_type in ['standard', 'skip', 'residual']
@@ -321,10 +315,6 @@ class SongUNet(torch.nn.Module):
         self.img_resolution = img_resolution
 
         super().__init__()
-                
-        self.condition_mode = condition_mode
-        in_channels = 2 * in_channels if self.condition_mode == 'concat' else in_channels
-        
         self.label_dropout = label_dropout
         emb_channels = model_channels * channel_mult_emb
         noise_channels = model_channels * channel_mult_noise
@@ -403,135 +393,7 @@ class SongUNet(torch.nn.Module):
                     self.dec[f'{res}x{res}_aux_conv_train'] = Conv2d(in_channels=cout, out_channels=out_channels, kernel=3,
                                                                **init_zero)
 
-    def convert_to_fp16(self):
-        """
-        Convert the torso of the model to float16.
-        """
-        
-        # self.map_label.apply(convert_module_to_f16)
-        # self.map_augment.apply(convert_module_to_f16)
-        # self.map_layer0.apply(convert_module_to_f16)
-        # self.map_layer1.apply(convert_module_to_f16)
-        
-        # if self.training_mode.lower() == 'ctm':
-        #     self.map_layer0_s.apply(convert_module_to_f16)
-        #     self.map_layer1_s.apply(convert_module_to_f16)
-
-        def _helper_convert_module_to_f16(l):
-            if isinstance(l, Conv2d):
-                l.weight.data = l.weight.data.half()
-                if l.bias is not None:
-                    l.bias.data = l.bias.data.half()
-            elif isinstance(l, (torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d)):
-                print('error!')
-                exit()
-                l.weight.data = l.weight.data.half()
-                if l.bias is not None:
-                    l.bias.data = l.bias.data.half()
-            elif isinstance(l, UNetBlock):
-                for name, m in l.named_children():
-                    if isinstance(m, (torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d)):
-                        print('error!')
-                        exit()
-                    elif isinstance(m, Conv2d):
-                        m.weight.data = m.weight.data.half()
-                        if m.bias is not None:
-                            m.bias.data = m.bias.data.half()
-        
-        self.enc.apply(_helper_convert_module_to_f16)
-        self.dec.apply(_helper_convert_module_to_f16)
-
-        # self.input_blocks.apply(convert_module_to_f16)
-        # self.middle_block.apply(convert_module_to_f16)
-        # self.output_blocks.apply(convert_module_to_f16)
-    
-    def convert_to_bf16(self):
-        """
-        Convert the torso of the model to bfloat16.
-        """
-        # self.map_label.apply(convert_module_to_bf16)
-        # self.map_augment.apply(convert_module_to_bf16)
-        # self.map_layer0.apply(convert_module_to_bf16)
-        # self.map_layer1.apply(convert_module_to_bf16)
-        
-        # if self.training_mode.lower() == 'ctm':
-        #     self.map_layer0_s.apply(convert_module_to_bf16)
-        #     self.map_layer1_s.apply(convert_module_to_bf16)
-    
-        def _helper_convert_module_to_bf16(l):
-            if isinstance(l, Conv2d):
-                l.weight.data = l.weight.data.bfloat16()
-                if l.bias is not None:
-                    l.bias.data = l.bias.data.bfloat16()
-            elif isinstance(l, (torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d)):
-                print('error!')
-                exit()
-                l.weight.data = l.weight.data.bfloat16()
-                if l.bias is not None:
-                    l.bias.data = l.bias.data.bfloat16()
-            elif isinstance(l, UNetBlock):
-                for name, m in l.named_children():
-                    if isinstance(m, (torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d)):
-                        print('error!')
-                        exit()
-                    elif isinstance(m, Conv2d):
-                        m.weight.data = m.weight.data.bfloat16()
-                        if m.bias is not None:
-                            m.bias.data = m.bias.data.bfloat16()
-
-        self.enc.apply(_helper_convert_module_to_bf16)
-        self.dec.apply(_helper_convert_module_to_bf16)
-        
-        # self.input_blocks.apply(convert_module_to_bf16)
-        # self.middle_block.apply(convert_module_to_bf16)
-        # self.output_blocks.apply(convert_module_to_bf16)
-
-    def convert_to_fp32(self):
-        """
-        Convert the torso of the model to float32.
-        """
-        # self.map_label.apply(convert_module_to_f32)
-        # self.map_augment.apply(convert_module_to_f32)
-        # self.map_layer0.apply(convert_module_to_f32)
-        # self.map_layer1.apply(convert_module_to_f32)
-        
-        # if self.training_mode.lower() == 'ctm':
-        #     self.map_layer0_s.apply(convert_module_to_f32)
-        #     self.map_layer1_s.apply(convert_module_to_f32)
-
-        def _helper_convert_module_to_f32(l):
-            if isinstance(l, Conv2d):
-                l.weight.data = l.weight.data.float()
-                if l.bias is not None:
-                    l.bias.data = l.bias.data.float()
-            elif isinstance(l, (torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d)):
-                l.weight.data = l.weight.data.float()
-                if l.bias is not None:
-                    l.bias.data = l.bias.data.float()
-            elif isinstance(l, UNetBlock):
-                for name, m in l.named_children():
-                    if isinstance(m, (torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d)):
-                        print('error!')
-                        exit()
-                    elif isinstance(m, Conv2d):
-                        m.weight.data = m.weight.data.float()
-                        if m.bias is not None:
-                            m.bias.data = m.bias.data.float()
-        self.enc.apply(_helper_convert_module_to_f32)
-        self.dec.apply(_helper_convert_module_to_f32)
-
-        # self.input_blocks.apply(convert_module_to_f32)
-        # self.middle_block.apply(convert_module_to_f32)
-        # self.output_blocks.apply(convert_module_to_f32)
-    
-    def forward(self, x, noise_labels, noise_labels_s, class_labels, x_T=None):
-        
-        if self.condition_mode == 'concat': # Should be true only for e2s and e2h and diode datasets (probably)!!
-            # print(xT.shape)
-            # exit()
-            assert x_T is not None
-            x = torch.cat([x, x_T], dim=1)
-        
+    def forward(self, x, noise_labels, noise_labels_s, class_labels):
         # Mapping.
         emb = self.map_noise(noise_labels)
         emb = emb.reshape(emb.shape[0], 2, -1).flip(1).reshape(*emb.shape) # swap sin/cos
@@ -540,9 +402,9 @@ class SongUNet(torch.nn.Module):
             if self.training and self.label_dropout:
                 tmp = tmp * (torch.rand([x.shape[0], 1], device=x.device) >= self.label_dropout).to(tmp.dtype)
             emb = emb + self.map_label(tmp * np.sqrt(self.map_label.in_features))
+
         emb = silu(self.map_layer0(emb))
         emb = silu(self.map_layer1(emb))
-        
         if noise_labels_s != None:
             emb_s = self.map_noise(noise_labels_s)
             emb_s = emb_s.reshape(emb_s.shape[0], 2, -1).flip(1).reshape(*emb_s.shape)  # swap sin/cos
@@ -616,8 +478,8 @@ class DhariwalUNet(torch.nn.Module):
         attn_resolutions    = [32,16,8],    # List of resolutions with self-attention.
         dropout             = 0.10,         # List of resolutions with self-attention.
         label_dropout       = 0,            # Dropout probability of class labels for classifier-free guidance.
-        training_mode='',
-        linear_probing=False,
+         training_mode='',
+         linear_probing=False,
     ):
         super().__init__()
         self.label_dropout = label_dropout
@@ -676,76 +538,6 @@ class DhariwalUNet(torch.nn.Module):
         self.out_norm = GroupNorm(num_channels=cout)
         self.out_conv = Conv2d(in_channels=cout, out_channels=out_channels, kernel=3, **init_zero)
 
-    def convert_to_fp16(self):
-        """
-        Convert the torso of the model to float16.
-        """
-        
-        # self.map_label.apply(convert_module_to_f16)
-        # self.map_augment.apply(convert_module_to_f16)
-        # self.map_layer0.apply(convert_module_to_f16)
-        # self.map_layer1.apply(convert_module_to_f16)
-        
-        # if self.training_mode.lower() == 'ctm':
-        #     self.map_layer0_s.apply(convert_module_to_f16)
-        #     self.map_layer1_s.apply(convert_module_to_f16)
-
-        self.enc.apply(convert_module_to_f16)
-        self.dec.apply(convert_module_to_f16)
-        
-        self.out_norm.apply(convert_module_to_f16)
-        self.out_conv.apply(convert_module_to_f16)
-        
-        # self.input_blocks.apply(convert_module_to_f16)
-        # self.middle_block.apply(convert_module_to_f16)
-        # self.output_blocks.apply(convert_module_to_f16)
-    
-    def convert_to_bf16(self):
-        """
-        Convert the torso of the model to bfloat16.
-        """
-        # self.map_label.apply(convert_module_to_bf16)
-        # self.map_augment.apply(convert_module_to_bf16)
-        # self.map_layer0.apply(convert_module_to_bf16)
-        # self.map_layer1.apply(convert_module_to_bf16)
-        
-        # if self.training_mode.lower() == 'ctm':
-        #     self.map_layer0_s.apply(convert_module_to_bf16)
-        #     self.map_layer1_s.apply(convert_module_to_bf16)
-
-        self.enc.apply(convert_module_to_bf16)
-        self.dec.apply(convert_module_to_bf16)
-        
-        self.out_norm.apply(convert_module_to_bf16)
-        self.out_conv.apply(convert_module_to_bf16)
-        
-        # self.input_blocks.apply(convert_module_to_bf16)
-        # self.middle_block.apply(convert_module_to_bf16)
-        # self.output_blocks.apply(convert_module_to_bf16)
-
-    def convert_to_fp32(self):
-        """
-        Convert the torso of the model to float32.
-        """
-        # self.map_label.apply(convert_module_to_f32)
-        # self.map_augment.apply(convert_module_to_f32)
-        # self.map_layer0.apply(convert_module_to_f32)
-        # self.map_layer1.apply(convert_module_to_f32)
-        
-        # if self.training_mode.lower() == 'ctm':
-        #     self.map_layer0_s.apply(convert_module_to_f32)
-        #     self.map_layer1_s.apply(convert_module_to_f32)
-
-        self.enc.apply(convert_module_to_f32)
-        self.dec.apply(convert_module_to_f32)
-        
-        self.out_norm.apply(convert_module_to_f32)
-        self.out_conv.apply(convert_module_to_f32)
-        
-        # self.input_blocks.apply(convert_module_to_f32)
-        # self.middle_block.apply(convert_module_to_f32)
-        # self.output_blocks.apply(convert_module_to_f32)
-        
     def forward(self, x, noise_labels, noise_labels_s, class_labels, augment_labels=None):
         # Mapping.
         emb = self.map_noise(noise_labels)
@@ -799,7 +591,6 @@ class VPPrecond(torch.nn.Module):
         img_channels,                   # Number of color channels.
         label_dim       = 0,            # Number of class labels, 0 = unconditional.
         use_fp16        = False,        # Execute the underlying model at FP16 precision?
-        use_bf16        = False,        # Execute the underlying model at BF16 precision?
         beta_d          = 19.9,         # Extent of the noise level schedule.
         beta_min        = 0.1,          # Initial slope of the noise level schedule.
         M               = 1000,         # Original number of timesteps in the DDPM formulation.
@@ -812,7 +603,6 @@ class VPPrecond(torch.nn.Module):
         self.img_channels = img_channels
         self.label_dim = label_dim
         self.use_fp16 = use_fp16
-        self.use_bf16 = use_bf16
         self.beta_d = beta_d
         self.beta_min = beta_min
         self.M = M
@@ -825,15 +615,8 @@ class VPPrecond(torch.nn.Module):
         x = x.to(torch.float32)
         sigma = sigma.to(torch.float32).reshape(-1, 1, 1, 1)
         class_labels = None if self.label_dim == 0 else torch.zeros([1, self.label_dim], device=x.device) if class_labels is None else class_labels.to(torch.float32).reshape(-1, self.label_dim)
-        # dtype = torch.float16 if (self.use_fp16 and not force_fp32 and x.device.type == 'cuda') else torch.float32
+        dtype = torch.float16 if (self.use_fp16 and not force_fp32 and x.device.type == 'cuda') else torch.float32
 
-        if self.use_fp16 and not force_fp32 and x.device.type == 'cuda':
-            dtype = torch.float16
-        elif self.use_bf16 and not force_fp32 and x.device.type == 'cuda':
-            dtype = torch.bfloat16
-        else:
-            dtype = torch.float32
-            
         c_skip = 1
         c_out = -sigma
         c_in = 1 / (sigma ** 2 + 1).sqrt()
@@ -854,25 +637,6 @@ class VPPrecond(torch.nn.Module):
 
     def round_sigma(self, sigma):
         return torch.as_tensor(sigma)
-    
-    def convert_to_fp16(self):
-        """
-        Convert the torso of the model to float16.
-        """
-
-        self.model.convert_to_fp16()
-    
-    def convert_to_bf16(self):
-        """
-        Convert the torso of the model to bfloat16.
-        """
-        self.model.convert_to_bf16()
-
-    def convert_to_fp32(self):
-        """
-        Convert the torso of the model to float32.
-        """
-        self.model.convert_to_fp32()
 
 #----------------------------------------------------------------------------
 # Preconditioning corresponding to the variance exploding (VE) formulation
@@ -886,7 +650,6 @@ class VEPrecond(torch.nn.Module):
         img_channels,                   # Number of color channels.
         label_dim       = 0,            # Number of class labels, 0 = unconditional.
         use_fp16        = False,        # Execute the underlying model at FP16 precision?
-        use_bf16        = False,        # Execute the underlying model at BF16 precision?
         sigma_min       = 0.02,         # Minimum supported noise level.
         sigma_max       = 100,          # Maximum supported noise level.
         model_type      = 'SongUNet',   # Class name of the underlying model.
@@ -897,7 +660,6 @@ class VEPrecond(torch.nn.Module):
         self.img_channels = img_channels
         self.label_dim = label_dim
         self.use_fp16 = use_fp16
-        self.use_bf16 = use_bf16
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
         self.model = globals()[model_type](img_resolution=img_resolution, in_channels=img_channels, out_channels=img_channels, label_dim=label_dim, **model_kwargs)
@@ -906,15 +668,8 @@ class VEPrecond(torch.nn.Module):
         x = x.to(torch.float32)
         sigma = sigma.to(torch.float32).reshape(-1, 1, 1, 1)
         class_labels = None if self.label_dim == 0 else torch.zeros([1, self.label_dim], device=x.device) if class_labels is None else class_labels.to(torch.float32).reshape(-1, self.label_dim)
-        
-        # dtype = torch.float16 if (self.use_fp16 and not force_fp32 and x.device.type == 'cuda') else torch.float32
-        if self.use_fp16 and not force_fp32 and x.device.type == 'cuda':
-            dtype = torch.float16
-        elif self.use_bf16 and not force_fp32 and x.device.type == 'cuda':
-            dtype = torch.bfloat16
-        else:
-            dtype = torch.float32
-            
+        dtype = torch.float16 if (self.use_fp16 and not force_fp32 and x.device.type == 'cuda') else torch.float32
+
         c_skip = 1
         c_out = sigma
         c_in = 1
@@ -927,26 +682,7 @@ class VEPrecond(torch.nn.Module):
 
     def round_sigma(self, sigma):
         return torch.as_tensor(sigma)
-    
-    def convert_to_fp16(self):
-        """
-        Convert the torso of the model to float16.
-        """
 
-        self.model.convert_to_fp16()
-    
-    def convert_to_bf16(self):
-        """
-        Convert the torso of the model to bfloat16.
-        """
-        self.model.convert_to_bf16()
-
-    def convert_to_fp32(self):
-        """
-        Convert the torso of the model to float32.
-        """
-        self.model.convert_to_fp32()
-        
 #----------------------------------------------------------------------------
 # Preconditioning corresponding to improved DDPM (iDDPM) formulation from
 # the paper "Improved Denoising Diffusion Probabilistic Models".
@@ -958,7 +694,6 @@ class iDDPMPrecond(torch.nn.Module):
         img_channels,                       # Number of color channels.
         label_dim       = 0,                # Number of class labels, 0 = unconditional.
         use_fp16        = False,            # Execute the underlying model at FP16 precision?
-        use_bf16        = False,        # Execute the underlying model at BF16 precision?
         C_1             = 0.001,            # Timestep adjustment at low noise levels.
         C_2             = 0.008,            # Timestep adjustment at high noise levels.
         M               = 1000,             # Original number of timesteps in the DDPM formulation.
@@ -970,7 +705,6 @@ class iDDPMPrecond(torch.nn.Module):
         self.img_channels = img_channels
         self.label_dim = label_dim
         self.use_fp16 = use_fp16
-        self.use_bf16 = use_bf16
         self.C_1 = C_1
         self.C_2 = C_2
         self.M = M
@@ -987,14 +721,8 @@ class iDDPMPrecond(torch.nn.Module):
         x = x.to(torch.float32)
         sigma = sigma.to(torch.float32).reshape(-1, 1, 1, 1)
         class_labels = None if self.label_dim == 0 else torch.zeros([1, self.label_dim], device=x.device) if class_labels is None else class_labels.to(torch.float32).reshape(-1, self.label_dim)
-        # dtype = torch.float16 if (self.use_fp16 and not force_fp32 and x.device.type == 'cuda') else torch.float32
-        if self.use_fp16 and not force_fp32 and x.device.type == 'cuda':
-            dtype = torch.float16
-        elif self.use_bf16 and not force_fp32 and x.device.type == 'cuda':
-            dtype = torch.bfloat16
-        else:
-            dtype = torch.float32
-            
+        dtype = torch.float16 if (self.use_fp16 and not force_fp32 and x.device.type == 'cuda') else torch.float32
+
         c_skip = 1
         c_out = -sigma
         c_in = 1 / (sigma ** 2 + 1).sqrt()
@@ -1014,26 +742,7 @@ class iDDPMPrecond(torch.nn.Module):
         index = torch.cdist(sigma.to(self.u.device).to(torch.float32).reshape(1, -1, 1), self.u.reshape(1, -1, 1)).argmin(2)
         result = index if return_index else self.u[index.flatten()].to(sigma.dtype)
         return result.reshape(sigma.shape).to(sigma.device)
-    
-    def convert_to_fp16(self):
-        """
-        Convert the torso of the model to float16.
-        """
 
-        self.model.convert_to_fp16()
-    
-    def convert_to_bf16(self):
-        """
-        Convert the torso of the model to bfloat16.
-        """
-        self.model.convert_to_bf16()
-
-    def convert_to_fp32(self):
-        """
-        Convert the torso of the model to float32.
-        """
-        self.model.convert_to_fp32()
-        
 #----------------------------------------------------------------------------
 # Improved preconditioning proposed in the paper "Elucidating the Design
 # Space of Diffusion-Based Generative Models" (EDM).
@@ -1045,7 +754,6 @@ class EDMPrecond(torch.nn.Module):
         img_channels,                       # Number of color channels.
         label_dim       = 0,                # Number of class labels, 0 = unconditional.
         use_fp16        = False,            # Execute the underlying model at FP16 precision?
-        use_bf16        = False,            # Execute the underlying model at BF16 precision?
         sigma_min       = 0,                # Minimum supported noise level.
         sigma_max       = float('inf'),     # Maximum supported noise level.
         sigma_data      = 0.5,              # Expected standard deviation of the training data.
@@ -1057,7 +765,6 @@ class EDMPrecond(torch.nn.Module):
         self.img_channels = img_channels
         self.label_dim = label_dim
         self.use_fp16 = use_fp16
-        self.use_bf16 = use_bf16
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
         self.sigma_data = sigma_data
@@ -1068,13 +775,7 @@ class EDMPrecond(torch.nn.Module):
         x = x.to(torch.float32)
         sigma = sigma.to(torch.float32).reshape(-1, 1, 1, 1)
         class_labels = None if self.label_dim == 0 else torch.zeros([1, self.label_dim], device=x.device) if class_labels is None else class_labels.to(torch.float32).reshape(-1, self.label_dim)
-        # dtype = torch.float16 if (self.use_fp16 and not force_fp32 and x.device.type == 'cuda') else torch.float32
-        if self.use_fp16 and not force_fp32 and x.device.type == 'cuda':
-            dtype = torch.float16
-        elif self.use_bf16 and not force_fp32 and x.device.type == 'cuda':
-            dtype = torch.bfloat16
-        else:
-            dtype = torch.float32
+        dtype = torch.float16 if (self.use_fp16 and not force_fp32 and x.device.type == 'cuda') else torch.float32
 
         c_skip = self.sigma_data ** 2 / (sigma ** 2 + self.sigma_data ** 2)
         c_out = sigma * self.sigma_data / (sigma ** 2 + self.sigma_data ** 2).sqrt()
@@ -1088,25 +789,6 @@ class EDMPrecond(torch.nn.Module):
 
     def round_sigma(self, sigma):
         return torch.as_tensor(sigma)
-    
-    def convert_to_fp16(self):
-        """
-        Convert the torso of the model to float16.
-        """
-
-        self.model.convert_to_fp16()
-    
-    def convert_to_bf16(self):
-        """
-        Convert the torso of the model to bfloat16.
-        """
-        self.model.convert_to_bf16()
-
-    def convert_to_fp32(self):
-        """
-        Convert the torso of the model to float32.
-        """
-        self.model.convert_to_fp32()
 
 #----------------------------------------------------------------------------
 
@@ -1121,7 +803,6 @@ class EDMPrecond_CTM(torch.nn.Module):
         img_channels,                       # Number of color channels.
         label_dim       = 0,                # Number of class labels, 0 = unconditional.
         use_fp16        = False,            # Execute the underlying model at FP16 precision?
-        use_bf16        = False,            # Execute the underlying model at BF16 precision?
         sigma_min       = 0,                # Minimum supported noise level.
         sigma_max       = float('inf'),     # Maximum supported noise level.
         sigma_data      = 0.5,              # Expected standard deviation of the training data.
@@ -1131,10 +812,6 @@ class EDMPrecond_CTM(torch.nn.Module):
         training_mode = '',
         arch='ncsn',
         linear_probing=False,
-        condition_mode=None,
-        sigma_data_end=None,
-        cov_xy=None,
-        inner_parametrization = 'edm',
         **model_kwargs,                     # Keyword arguments for the underlying model.
     ):
         super().__init__()
@@ -1143,14 +820,9 @@ class EDMPrecond_CTM(torch.nn.Module):
         self.img_channels = img_channels
         self.label_dim = label_dim
         self.use_fp16 = use_fp16
-        self.use_bf16 = use_bf16
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
         self.sigma_data = sigma_data
-        self.sigma_data_end = sigma_data_end
-        self.cov_xy = cov_xy
-        self.inner_parametrization = inner_parametrization
-        
         self.eye = torch.eye(self.label_dim, device=dist_util.dev())
         if teacher:
             import pickle
@@ -1168,62 +840,24 @@ class EDMPrecond_CTM(torch.nn.Module):
                                                    training_mode=training_mode, resample_filter=resample_filter,
                                                    channel_mult_noise=channel_mult_noise, encoder_type=encoder_type,
                                                    embedding_type=embedding_type, linear_probing=linear_probing,
-                                                   condition_mode=condition_mode,
                                                    **model_kwargs)
             else:
                 self.model = globals()[model_type](img_resolution=img_resolution, in_channels=img_channels,
                                                    out_channels=img_channels, label_dim=label_dim,
                                                    training_mode=training_mode, linear_probing=linear_probing,
-                                                   condition_mode=condition_mode,
                                                    **model_kwargs)
 
     def get_c_in(self, sigma):
-        if self.inner_parametrization == 'edm':
-            c_in = 1 / (sigma**2 + self.sigma_data**2) ** 0.5
-        elif self.inner_parametrization == 'cm_ddbm':
-            c = 1
-            sigma = sigma - self.sigma_min
-            snrT_div_snrt: torch.Tensor = (sigma**2) / (self.sigma_max**2)
-            a_t = snrT_div_snrt.detach().clone()
-            b_t = 1. - snrT_div_snrt
-            
-            A = a_t.square() * (self.sigma_data_end**2) + b_t.square() * (self.sigma_data**2) + (2*a_t*b_t*self.cov_xy) + ((c**2) * (sigma**2) * b_t)
-            c_in = 1 / A.sqrt()
-        elif self.inner_parametrization == 'ddbm':
-            c = 1
-            snrT_div_snrt: torch.Tensor = (sigma**2) / (self.sigma_max**2)
-            a_t = snrT_div_snrt.detach().clone()
-            b_t = 1. - snrT_div_snrt
-            
-            A = a_t.square() * (self.sigma_data_end**2) + b_t.square() * (self.sigma_data**2) + (2*a_t*b_t*self.cov_xy) + ((c**2) * (sigma**2) * b_t)
-            c_in = 1 / A.sqrt()
-        else:
-            raise NotImplementedError(f"c_in for '{self.inner_parametrization}' not implemented yet in network.py.")
-        return c_in
-    
+        return 1 / (sigma**2 + self.sigma_data**2) ** 0.5
+
     def unrescaling_t(self, rescaled_t):
         return torch.exp(rescaled_t / 250.) - 1e-44
 
-    # NOTE 8th July: 'x_T' is also rescaled below! 
-    #                 But, I have just kept the name as 'x_T' due to originally having started off with such a naming scheme.
-    def forward(self, rescaled_x, rescaled_t, s=None, teacher=False, x_T=None, **model_kwargs):
-        # print('model_kwargs', model_kwargs.keys())
-        # exit()
+    def forward(self, rescaled_x, rescaled_t, s=None, teacher=False, **model_kwargs):
         class_labels = None if self.label_dim == 0 else torch.zeros([1, self.label_dim], device=rescaled_x.device) \
             if model_kwargs == {} else self.eye[model_kwargs['y']].reshape(-1, self.label_dim)
-        
-        # dtype = torch.float16 if self.use_fp16 and rescaled_x.device.type == 'cuda' else torch.float32
-        # if self.use_fp16 and rescaled_x.device.type == 'cuda':
-        if self.use_fp16:
-            dtype = torch.float16
-        # elif self.use_bf16 and rescaled_x.device.type == 'cuda':
-        elif self.use_bf16:
-            dtype = torch.bfloat16
-        else:
-            dtype = torch.float32
-
+        dtype = torch.float16 if self.use_fp16 and rescaled_x.device.type == 'cuda' else torch.float32
         if self.teacher:
-            raise NotImplementedError()
             #with torch.no_grad():
             sigma = self.unrescaling_t(rescaled_t)
             c_in = append_dims(self.get_c_in(sigma), rescaled_x.ndim)
@@ -1233,66 +867,22 @@ class EDMPrecond_CTM(torch.nn.Module):
             c_out = append_dims(sigma * self.sigma_data / (sigma ** 2 + self.sigma_data ** 2).sqrt(), rescaled_x.ndim)
             F_x = (D_x - c_skip * x) / c_out
         else:
-            # # print('org t', rescaled_t)
             t = self.unrescaling_t(rescaled_t)
-            # # print('new t', t.min(), t.max())
-            t = (t + 1e-44).log() / 4
-            assert not t.isinf().any()
-            assert not t.isnan().any()
-            # # print('new t', t)
-            # # exit()
+            t = t.log() / 4
             if s != None:
                 s = self.unrescaling_t(s)
-                # print('old s', s.min(), s.max())
-                s = (s + 1e-44).log() / 4
-                # print('new s', s.min(), s.max())
-                # exit()
-                # assert not s.isinf().any()
-                # assert not s.isnan().any()
-            # t = rescaled_t
-            F_x = self.model(x=rescaled_x.to(dtype), 
-                            noise_labels=t.flatten(), 
-                            noise_labels_s=None if s == None else s.flatten(), 
-                            class_labels=class_labels,
-                            x_T=x_T.to(dtype).clone() if x_T is not None else None)
+                s = s.log() / 4
+            F_x = self.model(rescaled_x.to(dtype), t.flatten(), None if s == None else s.flatten(), class_labels=class_labels)
         #assert F_x.dtype == dtype
         return F_x
 
     def round_sigma(self, sigma):
         return torch.as_tensor(sigma)
 
-    # def convert_to_fp16(self):
-    #     pass
-
-    # def convert_to_fp32(self):
-    #     pass
-    
-    # def convert_to_bf16(self):
-    #     pass
-    
     def convert_to_fp16(self):
-        """
-        Convert the torso of the model to float16.
-        """
-        if self.teacher:
-            # print('this is teacher!!!')
-            pass
-        else:
-            self.model.convert_to_fp16()
-    
-    def convert_to_bf16(self):
-        """
-        Convert the torso of the model to bfloat16.
-        """
-        if self.teacher:
-            # print('this is teacher!!!')
-            pass
-        else:
-            self.model.convert_to_bf16()
+        pass
 
     def convert_to_fp32(self):
-        """
-        Convert the torso of the model to float32.
-        """
-        self.model.convert_to_fp32()
+        pass
+
 #----------------------------------------------------------------------------
